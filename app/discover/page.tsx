@@ -22,6 +22,8 @@ type Profile = {
   voice_chat: boolean | null;
   rp_styles?: string[] | null;
   rp_experience?: string | null;
+  gender?: string | null;
+  interested_in?: string[] | null;
 };
 
 type Block = {
@@ -83,7 +85,12 @@ const voiceOptions = ["All", "Voice Chat Yes", "Voice Chat No"];
 
 export default function DiscoverPage() {
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(
+    null
+  );
   const [loading, setLoading] = useState(true);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [actionMessage, setActionMessage] = useState("");
 
   const [modeFilter, setModeFilter] = useState("All");
   const [platformFilter, setPlatformFilter] = useState("All");
@@ -108,6 +115,14 @@ export default function DiscoverPage() {
     let blockedIds: string[] = [];
 
     if (user) {
+      const { data: myProfile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", user.id)
+        .single();
+
+      setCurrentUserProfile((myProfile as Profile) || null);
+
       const { data: blocks, error: blocksError } = await supabase
         .from("blocks")
         .select("blocker_id, blocked_id")
@@ -149,6 +164,32 @@ export default function DiscoverPage() {
     }
 
     setLoading(false);
+  }
+
+  function genderMatchesDatingPreferences(profile: Profile) {
+    if (modeFilter !== "Dating") return true;
+
+    if (!currentUserProfile) return true;
+
+    const myGender = currentUserProfile.gender;
+    const myInterestedIn = currentUserProfile.interested_in || [];
+
+    const theirGender = profile.gender;
+    const theirInterestedIn = profile.interested_in || [];
+
+    if (!myGender || !theirGender) return true;
+
+    const iWantThem =
+      myInterestedIn.includes("Everyone") ||
+      (myInterestedIn.includes("Women") && theirGender === "Female") ||
+      (myInterestedIn.includes("Men") && theirGender === "Male");
+
+    const theyWantMe =
+      theirInterestedIn.includes("Everyone") ||
+      (theirInterestedIn.includes("Women") && myGender === "Female") ||
+      (theirInterestedIn.includes("Men") && myGender === "Male");
+
+    return iWantThem && theyWantMe;
   }
 
   const filteredProfiles = useMemo(() => {
@@ -208,11 +249,13 @@ export default function DiscoverPage() {
         matchesLookingFor &&
         matchesVibe &&
         matchesRpStyle &&
-        matchesVoice
+        matchesVoice &&
+        genderMatchesDatingPreferences(profile)
       );
     });
   }, [
     profiles,
+    currentUserProfile,
     search,
     modeFilter,
     platformFilter,
@@ -222,6 +265,8 @@ export default function DiscoverPage() {
     rpStyleFilter,
     voiceFilter,
   ]);
+
+  const currentProfile = filteredProfiles[currentIndex] || null;
 
   const activeFilterCount =
     [
@@ -243,6 +288,71 @@ export default function DiscoverPage() {
     setRpStyleFilter("All");
     setVoiceFilter("All");
     setSearch("");
+    setCurrentIndex(0);
+  }
+
+  function passProfile() {
+    setActionMessage("");
+    setCurrentIndex((current) => current + 1);
+  }
+
+  async function qnectProfile() {
+    setActionMessage("");
+
+    if (!currentProfile) return;
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setActionMessage("You need to log in before sending a Qnect request.");
+      return;
+    }
+
+    const { data: existingBlocks, error: blockError } = await supabase
+      .from("blocks")
+      .select("id")
+      .or(
+        `and(blocker_id.eq.${user.id},blocked_id.eq.${currentProfile.id}),and(blocker_id.eq.${currentProfile.id},blocked_id.eq.${user.id})`
+      );
+
+    if (blockError) {
+      console.error("Block check error:", blockError.message);
+      setActionMessage("Something went wrong checking this profile.");
+      return;
+    }
+
+    if (existingBlocks && existingBlocks.length > 0) {
+      setActionMessage("You cannot Qnect with this user.");
+      return;
+    }
+
+    const { error } = await supabase.from("matches").insert({
+      sender_id: user.id,
+      receiver_id: currentProfile.id,
+      status: "pending",
+    });
+
+    if (error) {
+      if (error.code === "23505") {
+        setActionMessage("You already sent this user a Qnect request.");
+      } else {
+        console.error("Qnect error:", error.message);
+        setActionMessage("Something went wrong sending the Qnect request.");
+      }
+
+      return;
+    }
+
+    await supabase.from("notifications").insert({
+      user_id: currentProfile.id,
+      actor_id: user.id,
+      type: "match_request",
+    });
+
+    setActionMessage("Qnect request sent.");
+    setCurrentIndex((current) => current + 1);
   }
 
   return (
@@ -258,12 +368,12 @@ export default function DiscoverPage() {
               </p>
 
               <h1 className="text-4xl font-black md:text-6xl">
-                Find your next Qnect.
+                Swipe your next Qnect.
               </h1>
 
               <p className="mt-3 max-w-2xl text-white/55">
-                Browse real gamers, roleplayers, duo partners, friend groups,
-                and people looking for the same vibe as you.
+                Browse one profile at a time. Pass, view, or send a Qnect
+                request.
               </p>
             </div>
 
@@ -275,210 +385,277 @@ export default function DiscoverPage() {
             </Link>
           </div>
 
-          <div className="mb-8 rounded-[2rem] border border-white/10 bg-white/[0.04] p-5">
-            <div className="mb-5 flex flex-col justify-between gap-3 md:flex-row md:items-center">
-              <div>
-                <h2 className="text-2xl font-black">Filters</h2>
-                <p className="mt-1 text-sm text-white/40">
-                  Narrow down profiles by game, platform, vibe, and RP style.
-                </p>
-              </div>
+          <div className="grid gap-8 lg:grid-cols-[340px_1fr]">
+            <aside className="h-fit rounded-[2rem] border border-white/10 bg-white/[0.04] p-5">
+              <div className="mb-5 flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-2xl font-black">Filters</h2>
+                  <p className="mt-1 text-sm text-white/40">
+                    Tune your swipe stack.
+                  </p>
+                </div>
 
-              <div className="flex items-center gap-3">
                 {activeFilterCount > 0 && (
                   <span className="rounded-full bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-200">
-                    {activeFilterCount} active
+                    {activeFilterCount}
                   </span>
                 )}
+              </div>
+
+              <div className="grid gap-4">
+                <input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value);
+                    setCurrentIndex(0);
+                  }}
+                  placeholder="Search name, game, vibe..."
+                  className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none placeholder:text-white/35"
+                />
+
+                <FilterSelect
+                  value={modeFilter}
+                  setValue={(value) => {
+                    setModeFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={modes}
+                  label="Mode"
+                />
+
+                <FilterSelect
+                  value={platformFilter}
+                  setValue={(value) => {
+                    setPlatformFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={platforms}
+                  label="Platform"
+                />
+
+                <FilterSelect
+                  value={gameFilter}
+                  setValue={(value) => {
+                    setGameFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={games}
+                  label="Game"
+                />
+
+                <FilterSelect
+                  value={lookingForFilter}
+                  setValue={(value) => {
+                    setLookingForFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={lookingForOptions}
+                  label="Looking For"
+                />
+
+                <FilterSelect
+                  value={vibeFilter}
+                  setValue={(value) => {
+                    setVibeFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={vibesOptions}
+                  label="Vibe"
+                />
+
+                <FilterSelect
+                  value={rpStyleFilter}
+                  setValue={(value) => {
+                    setRpStyleFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={rpStyleOptions}
+                  label="RP Style"
+                />
+
+                <FilterSelect
+                  value={voiceFilter}
+                  setValue={(value) => {
+                    setVoiceFilter(value);
+                    setCurrentIndex(0);
+                  }}
+                  options={voiceOptions}
+                  label="Voice Chat"
+                />
 
                 <button
                   onClick={clearFilters}
                   className="rounded-2xl border border-white/10 px-4 py-3 text-sm font-bold text-white/65 hover:bg-white/10 hover:text-white"
                 >
-                  Clear
+                  Clear Filters
                 </button>
+
+                <p className="text-sm text-white/40">
+                  Showing {currentProfile ? currentIndex + 1 : 0} of{" "}
+                  {filteredProfiles.length}
+                </p>
               </div>
-            </div>
+            </aside>
 
-            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search name, game, vibe..."
-                className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none placeholder:text-white/35 xl:col-span-2"
-              />
+            <section className="flex justify-center">
+              {loading ? (
+                <div className="w-full max-w-xl rounded-[2rem] border border-white/10 bg-white/[0.04] p-8 text-white/60">
+                  Loading profiles...
+                </div>
+              ) : !currentProfile ? (
+                <div className="w-full max-w-xl rounded-[2rem] border border-white/10 bg-white/[0.04] p-8 text-center">
+                  <h2 className="text-3xl font-black">No more profiles</h2>
+                  <p className="mt-3 text-white/50">
+                    Try changing filters or check back later.
+                  </p>
 
-              <FilterSelect
-                value={modeFilter}
-                setValue={setModeFilter}
-                options={modes}
-                label="Mode"
-              />
-
-              <FilterSelect
-                value={platformFilter}
-                setValue={setPlatformFilter}
-                options={platforms}
-                label="Platform"
-              />
-
-              <FilterSelect
-                value={gameFilter}
-                setValue={setGameFilter}
-                options={games}
-                label="Game"
-              />
-
-              <FilterSelect
-                value={lookingForFilter}
-                setValue={setLookingForFilter}
-                options={lookingForOptions}
-                label="Looking For"
-              />
-
-              <FilterSelect
-                value={vibeFilter}
-                setValue={setVibeFilter}
-                options={vibesOptions}
-                label="Vibe"
-              />
-
-              <FilterSelect
-                value={rpStyleFilter}
-                setValue={setRpStyleFilter}
-                options={rpStyleOptions}
-                label="RP Style"
-              />
-
-              <FilterSelect
-                value={voiceFilter}
-                setValue={setVoiceFilter}
-                options={voiceOptions}
-                label="Voice Chat"
-              />
-            </div>
-
-            <p className="mt-4 text-sm text-white/40">
-              Showing {filteredProfiles.length} of {profiles.length} profiles
-            </p>
-          </div>
-
-          {loading && (
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8 text-white/60">
-              Loading profiles...
-            </div>
-          )}
-
-          {!loading && profiles.length === 0 && (
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
-              <h2 className="text-2xl font-black">No profiles yet</h2>
-              <p className="mt-2 text-white/50">
-                Once more users complete their profiles, they will show here.
-              </p>
-            </div>
-          )}
-
-          {!loading && profiles.length > 0 && filteredProfiles.length === 0 && (
-            <div className="rounded-3xl border border-white/10 bg-white/[0.04] p-8">
-              <h2 className="text-2xl font-black">No matches found</h2>
-              <p className="mt-2 text-white/50">
-                Try changing your filters or clearing your search.
-              </p>
-
-              <button
-                onClick={clearFilters}
-                className="mt-5 rounded-2xl bg-violet-600 px-5 py-3 text-sm font-bold hover:bg-violet-500"
-              >
-                Clear Filters
-              </button>
-            </div>
-          )}
-
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredProfiles.map((profile) => {
-              const displayName =
-                profile.display_name || profile.username || "Unknown";
-              const avatarLetter = displayName.charAt(0).toUpperCase();
-              const isDating = profile.mode === "Dating";
-
-              return (
-                <Link
-                  key={profile.id}
-                  href={`/profile/${profile.id}`}
-                  className="group overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.04] shadow-xl transition hover:-translate-y-1 hover:border-violet-400/60 hover:bg-white/[0.07]"
-                >
-                  <div
-                    className={
-                      isDating
-                        ? "h-36 bg-gradient-to-br from-pink-600 via-rose-600 to-purple-900"
-                        : "h-36 bg-gradient-to-br from-cyan-700 via-violet-700 to-blue-950"
-                    }
-                  />
-
-                  <div className="relative p-5">
-                    <div className="-mt-16 mb-4 flex h-24 w-24 items-center justify-center overflow-hidden rounded-3xl border-4 border-[#090b12] bg-black/40 text-4xl font-black">
-                      {profile.avatar_url ? (
-                        <img
-                          src={profile.avatar_url}
-                          alt={displayName}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        avatarLetter
-                      )}
-                    </div>
-
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <h2 className="text-2xl font-black leading-tight">
-                          {displayName}
-                        </h2>
-
-                        <p className="text-sm text-white/45">
-                          @{profile.username || "unknown"}
-                        </p>
-                      </div>
-
-                      {profile.mode && (
-                        <span
-                          className={
-                            isDating
-                              ? "rounded-full bg-pink-500/15 px-3 py-1 text-xs font-bold text-pink-200"
-                              : "rounded-full bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-200"
-                          }
-                        >
-                          {profile.mode}
-                        </span>
-                      )}
-                    </div>
-
-                    <p className="mt-4 line-clamp-3 min-h-[4.5rem] text-sm leading-6 text-white/55">
-                      {profile.bio || "No bio yet."}
-                    </p>
-
-                    <div className="mt-5 grid grid-cols-2 gap-2 text-xs">
-                      <MiniInfo label="Platform" value={profile.platform} />
-                      <MiniInfo
-                        label="Voice"
-                        value={profile.voice_chat ? "Yes" : "No"}
-                      />
-                    </div>
-
-                    <TagRow items={profile.games || []} color="cyan" />
-                    <TagRow items={profile.looking_for || []} color="green" />
-                    <TagRow items={profile.vibes || []} color="purple" />
-
-                    <div className="mt-5 rounded-2xl bg-white/10 py-3 text-center text-sm font-black text-white transition group-hover:bg-violet-600">
-                      View Profile
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
+                  <button
+                    onClick={clearFilters}
+                    className="mt-6 rounded-2xl bg-violet-600 px-6 py-3 font-bold hover:bg-violet-500"
+                  >
+                    Reset Stack
+                  </button>
+                </div>
+              ) : (
+                <ProfileCard
+                  profile={currentProfile}
+                  actionMessage={actionMessage}
+                  onPass={passProfile}
+                  onQnect={qnectProfile}
+                />
+              )}
+            </section>
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function ProfileCard({
+  profile,
+  actionMessage,
+  onPass,
+  onQnect,
+}: {
+  profile: Profile;
+  actionMessage: string;
+  onPass: () => void;
+  onQnect: () => void;
+}) {
+  const displayName = profile.display_name || profile.username || "Unknown";
+  const avatarLetter = displayName.charAt(0).toUpperCase();
+  const isDating = profile.mode === "Dating";
+
+  return (
+    <div className="w-full max-w-xl overflow-hidden rounded-[2.5rem] border border-white/10 bg-white/[0.05] shadow-2xl">
+      <div
+        className={
+          isDating
+            ? "h-48 bg-gradient-to-br from-pink-600 via-rose-600 to-purple-900"
+            : "h-48 bg-gradient-to-br from-cyan-700 via-violet-700 to-blue-950"
+        }
+      />
+
+      <div className="relative p-6">
+        <div className="-mt-24 mb-5 flex h-36 w-36 items-center justify-center overflow-hidden rounded-[2rem] border-4 border-[#090b12] bg-black/40 text-6xl font-black">
+          {profile.avatar_url ? (
+            <img
+              src={profile.avatar_url}
+              alt={displayName}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            avatarLetter
+          )}
+        </div>
+
+        <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+          <div>
+            <h2 className="text-4xl font-black leading-tight">
+              {displayName}
+              {profile.age ? (
+                <span className="ml-3 text-2xl text-white/55">
+                  {profile.age}
+                </span>
+              ) : null}
+            </h2>
+
+            <p className="mt-1 text-white/45">@{profile.username || "unknown"}</p>
+          </div>
+
+          {profile.mode && (
+            <span
+              className={
+                isDating
+                  ? "w-fit rounded-full bg-pink-500/15 px-4 py-2 text-sm font-bold text-pink-200"
+                  : "w-fit rounded-full bg-violet-500/15 px-4 py-2 text-sm font-bold text-violet-200"
+              }
+            >
+              {profile.mode}
+            </span>
+          )}
+        </div>
+
+        <p className="mt-5 min-h-[5rem] text-sm leading-6 text-white/60">
+          {profile.bio || "No bio yet."}
+        </p>
+
+        <div className="mt-5 grid grid-cols-2 gap-2 text-xs">
+          <MiniInfo label="Platform" value={profile.platform} />
+          <MiniInfo
+            label="Voice"
+            value={profile.voice_chat ? "Yes" : "No"}
+          />
+          <MiniInfo label="Gender" value={profile.gender || "Not listed"} />
+          <MiniInfo
+            label="Timezone"
+            value={profile.timezone || "Not listed"}
+          />
+        </div>
+
+        <TagRow title="Games" items={profile.games || []} color="cyan" />
+        <TagRow
+          title="Looking For"
+          items={profile.looking_for || []}
+          color="green"
+        />
+        <TagRow title="Vibes" items={profile.vibes || []} color="purple" />
+
+        {actionMessage && (
+          <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-white/70">
+            {actionMessage}
+          </div>
+        )}
+
+        <div className="mt-6 grid grid-cols-3 gap-3">
+          <button
+            onClick={onPass}
+            className="rounded-2xl border border-white/10 py-4 font-black text-white/70 hover:bg-white/10"
+          >
+            Pass
+          </button>
+
+          <Link
+            href={`/profile/${profile.id}`}
+            className="rounded-2xl border border-white/10 py-4 text-center font-black text-white/80 hover:bg-white/10"
+          >
+            View
+          </Link>
+
+          <button
+            onClick={onQnect}
+            className={
+              isDating
+                ? "rounded-2xl bg-pink-500 py-4 font-black hover:bg-pink-400"
+                : "rounded-2xl bg-violet-600 py-4 font-black hover:bg-violet-500"
+            }
+          >
+            Qnect
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -534,36 +711,44 @@ function MiniInfo({
 }
 
 function TagRow({
+  title,
   items,
   color,
 }: {
+  title: string;
   items: string[];
   color: "cyan" | "green" | "purple";
 }) {
   if (!items || items.length === 0) return null;
 
   return (
-    <div className="mt-4 flex flex-wrap gap-2">
-      {items.slice(0, 4).map((item) => (
-        <span
-          key={item}
-          className={
-            color === "cyan"
-              ? "rounded-full bg-cyan-500/10 px-3 py-1 text-xs text-cyan-300"
-              : color === "green"
-              ? "rounded-full bg-green-500/10 px-3 py-1 text-xs text-green-300"
-              : "rounded-full bg-purple-500/10 px-3 py-1 text-xs text-purple-300"
-          }
-        >
-          {item}
-        </span>
-      ))}
+    <div className="mt-5">
+      <p className="mb-2 text-xs font-black uppercase tracking-widest text-white/35">
+        {title}
+      </p>
 
-      {items.length > 4 && (
-        <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/50">
-          +{items.length - 4}
-        </span>
-      )}
+      <div className="flex flex-wrap gap-2">
+        {items.slice(0, 5).map((item) => (
+          <span
+            key={item}
+            className={
+              color === "cyan"
+                ? "rounded-full bg-cyan-500/10 px-3 py-1 text-xs text-cyan-300"
+                : color === "green"
+                ? "rounded-full bg-green-500/10 px-3 py-1 text-xs text-green-300"
+                : "rounded-full bg-purple-500/10 px-3 py-1 text-xs text-purple-300"
+            }
+          >
+            {item}
+          </span>
+        ))}
+
+        {items.length > 5 && (
+          <span className="rounded-full bg-white/10 px-3 py-1 text-xs text-white/50">
+            +{items.length - 5}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
