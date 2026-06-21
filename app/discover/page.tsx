@@ -31,6 +31,10 @@ type Block = {
   blocked_id: string;
 };
 
+type SwipeAction = {
+  target_user_id: string;
+};
+
 const modes = ["All", "Friends", "Gaming", "RP", "Dating"];
 const platforms = ["All", "PC", "Xbox", "PlayStation", "Switch", "VR", "Mobile"];
 const games = [
@@ -113,6 +117,7 @@ export default function DiscoverPage() {
     } = await supabase.auth.getUser();
 
     let blockedIds: string[] = [];
+    let swipedIds: string[] = [];
 
     if (user) {
       const { data: myProfile } = await supabase
@@ -138,6 +143,20 @@ export default function DiscoverPage() {
             )
             .filter(Boolean) || [];
       }
+
+      const { data: swipes, error: swipesError } = await supabase
+        .from("swipe_actions")
+        .select("target_user_id")
+        .eq("user_id", user.id);
+
+      if (swipesError) {
+        console.error("Error loading swipes:", swipesError.message);
+      } else {
+        swipedIds =
+          (swipes as SwipeAction[] | null)?.map(
+            (swipe) => swipe.target_user_id
+          ) || [];
+      }
     }
 
     let query = supabase
@@ -157,23 +176,23 @@ export default function DiscoverPage() {
       setProfiles([]);
     } else {
       const visibleProfiles = ((data as Profile[]) || []).filter(
-        (profile) => !blockedIds.includes(profile.id)
+        (profile) =>
+          !blockedIds.includes(profile.id) && !swipedIds.includes(profile.id)
       );
 
       setProfiles(visibleProfiles);
     }
 
+    setCurrentIndex(0);
     setLoading(false);
   }
 
   function genderMatchesDatingPreferences(profile: Profile) {
     if (modeFilter !== "Dating") return true;
-
     if (!currentUserProfile) return true;
 
     const myGender = currentUserProfile.gender;
     const myInterestedIn = currentUserProfile.interested_in || [];
-
     const theirGender = profile.gender;
     const theirInterestedIn = profile.interested_in || [];
 
@@ -291,8 +310,40 @@ export default function DiscoverPage() {
     setCurrentIndex(0);
   }
 
-  function passProfile() {
+  async function saveSwipeAction(targetUserId: string, action: "pass" | "qnect") {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setActionMessage("You need to log in first.");
+      return false;
+    }
+
+    const { error } = await supabase.from("swipe_actions").upsert({
+      user_id: user.id,
+      target_user_id: targetUserId,
+      action,
+    });
+
+    if (error) {
+      console.error("Swipe action error:", error.message);
+      setActionMessage("Something went wrong saving this swipe.");
+      return false;
+    }
+
+    return true;
+  }
+
+  async function passProfile() {
     setActionMessage("");
+
+    if (!currentProfile) return;
+
+    const saved = await saveSwipeAction(currentProfile.id, "pass");
+
+    if (!saved) return;
+
     setCurrentIndex((current) => current + 1);
   }
 
@@ -336,7 +387,9 @@ export default function DiscoverPage() {
 
     if (error) {
       if (error.code === "23505") {
+        await saveSwipeAction(currentProfile.id, "qnect");
         setActionMessage("You already sent this user a Qnect request.");
+        setCurrentIndex((current) => current + 1);
       } else {
         console.error("Qnect error:", error.message);
         setActionMessage("Something went wrong sending the Qnect request.");
@@ -344,6 +397,8 @@ export default function DiscoverPage() {
 
       return;
     }
+
+    await saveSwipeAction(currentProfile.id, "qnect");
 
     await supabase.from("notifications").insert({
       user_id: currentProfile.id,
@@ -490,6 +545,13 @@ export default function DiscoverPage() {
                   Clear Filters
                 </button>
 
+                <button
+                  onClick={loadProfiles}
+                  className="rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold text-white/75 hover:bg-white/15"
+                >
+                  Refresh Stack
+                </button>
+
                 <p className="text-sm text-white/40">
                   Showing {currentProfile ? currentIndex + 1 : 0} of{" "}
                   {filteredProfiles.length}
@@ -513,7 +575,7 @@ export default function DiscoverPage() {
                     onClick={clearFilters}
                     className="mt-6 rounded-2xl bg-violet-600 px-6 py-3 font-bold hover:bg-violet-500"
                   >
-                    Reset Stack
+                    Reset Filters
                   </button>
                 </div>
               ) : (
@@ -603,15 +665,9 @@ function ProfileCard({
 
         <div className="mt-5 grid grid-cols-2 gap-2 text-xs">
           <MiniInfo label="Platform" value={profile.platform} />
-          <MiniInfo
-            label="Voice"
-            value={profile.voice_chat ? "Yes" : "No"}
-          />
+          <MiniInfo label="Voice" value={profile.voice_chat ? "Yes" : "No"} />
           <MiniInfo label="Gender" value={profile.gender || "Not listed"} />
-          <MiniInfo
-            label="Timezone"
-            value={profile.timezone || "Not listed"}
-          />
+          <MiniInfo label="Timezone" value={profile.timezone || "Not listed"} />
         </div>
 
         <TagRow title="Games" items={profile.games || []} color="cyan" />
