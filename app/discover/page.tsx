@@ -35,6 +35,13 @@ type SwipeAction = {
   target_user_id: string;
 };
 
+type UserPlan = {
+  user_id: string;
+  plan: string;
+};
+
+const FREE_DAILY_QNECT_LIMIT = 20;
+
 const modes = ["All", "Friends", "Gaming", "RP", "Dating"];
 const platforms = ["All", "PC", "Xbox", "PlayStation", "Switch", "VR", "Mobile"];
 const games = [
@@ -92,6 +99,10 @@ export default function DiscoverPage() {
   const [currentUserProfile, setCurrentUserProfile] = useState<Profile | null>(
     null
   );
+
+  const [userPlan, setUserPlan] = useState("free");
+  const [dailyQnectCount, setDailyQnectCount] = useState(0);
+
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [actionMessage, setActionMessage] = useState("");
@@ -105,9 +116,69 @@ export default function DiscoverPage() {
   const [voiceFilter, setVoiceFilter] = useState("All");
   const [search, setSearch] = useState("");
 
+  const isFreePlan = userPlan === "free";
+  const qnectsRemaining = isFreePlan
+    ? Math.max(FREE_DAILY_QNECT_LIMIT - dailyQnectCount, 0)
+    : 999;
+  const hasReachedLimit = isFreePlan && qnectsRemaining <= 0;
+
   useEffect(() => {
     loadProfiles();
   }, []);
+
+  async function ensureUserPlan(userId: string) {
+    const { data: existingPlan, error: planError } = await supabase
+      .from("user_plans")
+      .select("user_id, plan")
+      .eq("user_id", userId)
+      .single();
+
+    if (planError && planError.code !== "PGRST116") {
+      console.error("Plan load error:", planError.message);
+    }
+
+    if (existingPlan) {
+      setUserPlan((existingPlan as UserPlan).plan || "free");
+      return;
+    }
+
+    const { data: insertedPlan, error: insertError } = await supabase
+      .from("user_plans")
+      .insert({
+        user_id: userId,
+        plan: "free",
+      })
+      .select("user_id, plan")
+      .single();
+
+    if (insertError) {
+      console.error("Plan insert error:", insertError.message);
+      setUserPlan("free");
+      return;
+    }
+
+    setUserPlan((insertedPlan as UserPlan).plan || "free");
+  }
+
+  async function loadDailyQnectCount(userId: string) {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const { count, error } = await supabase
+      .from("swipe_actions")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", userId)
+      .eq("action", "qnect")
+      .gte("created_at", startOfDay.toISOString());
+
+    if (error) {
+      console.error("Daily Qnect count error:", error.message);
+      setDailyQnectCount(0);
+      return;
+    }
+
+    setDailyQnectCount(count || 0);
+  }
 
   async function loadProfiles() {
     setLoading(true);
@@ -120,6 +191,9 @@ export default function DiscoverPage() {
     let swipedIds: string[] = [];
 
     if (user) {
+      await ensureUserPlan(user.id);
+      await loadDailyQnectCount(user.id);
+
       const { data: myProfile } = await supabase
         .from("profiles")
         .select("*")
@@ -361,6 +435,13 @@ export default function DiscoverPage() {
       return;
     }
 
+    if (hasReachedLimit) {
+      setActionMessage(
+        "You reached your free daily Qnect limit. Upgrade for unlimited Qnects."
+      );
+      return;
+    }
+
     const { data: existingBlocks, error: blockError } = await supabase
       .from("blocks")
       .select("id")
@@ -399,6 +480,8 @@ export default function DiscoverPage() {
     }
 
     await saveSwipeAction(currentProfile.id, "qnect");
+
+    setDailyQnectCount((current) => current + 1);
 
     await supabase.from("notifications").insert({
       user_id: currentProfile.id,
@@ -454,6 +537,34 @@ export default function DiscoverPage() {
                   <span className="rounded-full bg-violet-500/15 px-3 py-1 text-xs font-bold text-violet-200">
                     {activeFilterCount}
                   </span>
+                )}
+              </div>
+
+              <div className="mb-5 rounded-2xl border border-violet-500/20 bg-violet-500/10 p-4">
+                <p className="text-xs font-black uppercase tracking-widest text-violet-200">
+                  Plan
+                </p>
+
+                <p className="mt-2 text-lg font-black capitalize">{userPlan}</p>
+
+                {isFreePlan ? (
+                  <p className="mt-1 text-sm text-white/55">
+                    {qnectsRemaining} of {FREE_DAILY_QNECT_LIMIT} Qnects left
+                    today.
+                  </p>
+                ) : (
+                  <p className="mt-1 text-sm text-white/55">
+                    Unlimited Qnects enabled.
+                  </p>
+                )}
+
+                {hasReachedLimit && (
+                  <Link
+                    href="/upgrade"
+                    className="mt-4 inline-block rounded-xl bg-violet-600 px-4 py-2 text-sm font-bold hover:bg-violet-500"
+                  >
+                    Upgrade
+                  </Link>
                 )}
               </div>
 
@@ -584,6 +695,7 @@ export default function DiscoverPage() {
                   actionMessage={actionMessage}
                   onPass={passProfile}
                   onQnect={qnectProfile}
+                  hasReachedLimit={hasReachedLimit}
                 />
               )}
             </section>
@@ -599,11 +711,13 @@ function ProfileCard({
   actionMessage,
   onPass,
   onQnect,
+  hasReachedLimit,
 }: {
   profile: Profile;
   actionMessage: string;
   onPass: () => void;
   onQnect: () => void;
+  hasReachedLimit: boolean;
 }) {
   const displayName = profile.display_name || profile.username || "Unknown";
   const avatarLetter = displayName.charAt(0).toUpperCase();
@@ -702,12 +816,14 @@ function ProfileCard({
           <button
             onClick={onQnect}
             className={
-              isDating
+              hasReachedLimit
+                ? "rounded-2xl bg-white/10 py-4 font-black text-white/40"
+                : isDating
                 ? "rounded-2xl bg-pink-500 py-4 font-black hover:bg-pink-400"
                 : "rounded-2xl bg-violet-600 py-4 font-black hover:bg-violet-500"
             }
           >
-            Qnect
+            {hasReachedLimit ? "Limit" : "Qnect"}
           </button>
         </div>
       </div>
