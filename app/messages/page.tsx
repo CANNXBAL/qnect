@@ -164,15 +164,7 @@ export default function MessagesPage() {
       const lastMessage = conversationMessages[0] || null;
 
       const unreadCount = conversationMessages.filter((msg) => {
-        if (msg.sender_id === currentUserId) return false;
-
-        if (msg.receiver_id === currentUserId && msg.is_read === false) {
-          return true;
-        }
-
-        if (!membership?.last_read_at) return true;
-
-        return new Date(msg.created_at) > new Date(membership.last_read_at);
+      return msg.receiver_id === currentUserId && msg.is_read === false;
       }).length;
 
       return {
