@@ -27,6 +27,15 @@ type Profile = {
   dating_intent: string | null;
 };
 
+const reportReasons = [
+  "Harassment",
+  "Spam",
+  "Fake Profile",
+  "Inappropriate Content",
+  "Scam",
+  "Other",
+];
+
 export default function ProfilePage() {
   const params = useParams();
   const id = params.id as string;
@@ -35,6 +44,13 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true);
   const [sendingRequest, setSendingRequest] = useState(false);
   const [requestMessage, setRequestMessage] = useState("");
+
+  const [safetyMessage, setSafetyMessage] = useState("");
+  const [blocking, setBlocking] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportReason, setReportReason] = useState("Harassment");
+  const [reportDetails, setReportDetails] = useState("");
+  const [reporting, setReporting] = useState(false);
 
   useEffect(() => {
     loadProfile();
@@ -105,6 +121,94 @@ export default function ProfilePage() {
 
     setRequestMessage("Qnect request sent!");
     setSendingRequest(false);
+  }
+
+  async function blockUser() {
+    setSafetyMessage("");
+    setBlocking(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setSafetyMessage("You need to be logged in to block someone.");
+      setBlocking(false);
+      return;
+    }
+
+    if (user.id === profile?.id) {
+      setSafetyMessage("You cannot block yourself.");
+      setBlocking(false);
+      return;
+    }
+
+    const confirmBlock = window.confirm(
+      `Block ${displayName}? They will be hidden from your Discover page.`
+    );
+
+    if (!confirmBlock) {
+      setBlocking(false);
+      return;
+    }
+
+    const { error } = await supabase.from("blocks").upsert({
+      blocker_id: user.id,
+      blocked_id: profile?.id,
+    });
+
+    if (error) {
+      console.error("Block error:", error.message);
+      setSafetyMessage("Something went wrong blocking this user.");
+      setBlocking(false);
+      return;
+    }
+
+    setSafetyMessage("User blocked.");
+    setBlocking(false);
+  }
+
+  async function submitReport(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+
+    setSafetyMessage("");
+    setReporting(true);
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      setSafetyMessage("You need to be logged in to report someone.");
+      setReporting(false);
+      return;
+    }
+
+    if (user.id === profile?.id) {
+      setSafetyMessage("You cannot report yourself.");
+      setReporting(false);
+      return;
+    }
+
+    const { error } = await supabase.from("reports").insert({
+      reporter_id: user.id,
+      reported_id: profile?.id,
+      reason: reportReason,
+      details: reportDetails.trim() || null,
+    });
+
+    if (error) {
+      console.error("Report error:", error.message);
+      setSafetyMessage("Something went wrong sending the report.");
+      setReporting(false);
+      return;
+    }
+
+    setSafetyMessage("Report submitted. Thanks for helping keep Qnect safe.");
+    setReportOpen(false);
+    setReportReason("Harassment");
+    setReportDetails("");
+    setReporting(false);
   }
 
   if (loading) {
@@ -229,18 +333,62 @@ export default function ProfilePage() {
               <h2 className="text-lg font-black">Safety</h2>
 
               <p className="mt-2 text-sm leading-6 text-white/45">
-                Report, block, and privacy tools will live here.
+                Block or report users who break trust, spam, harass, or make
+                Qnect unsafe.
               </p>
 
               <div className="mt-4 flex gap-2">
-                <button className="flex-1 rounded-xl border border-white/10 px-4 py-3 text-sm text-white/70 hover:bg-white/5">
-                  Block
+                <button
+                  onClick={blockUser}
+                  disabled={blocking}
+                  className="flex-1 rounded-xl border border-white/10 px-4 py-3 text-sm text-white/70 hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {blocking ? "Blocking..." : "Block"}
                 </button>
 
-                <button className="flex-1 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300 hover:bg-red-500/20">
+                <button
+                  onClick={() => setReportOpen((current) => !current)}
+                  className="flex-1 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300 hover:bg-red-500/20"
+                >
                   Report
                 </button>
               </div>
+
+              {reportOpen && (
+                <form onSubmit={submitReport} className="mt-5 space-y-3">
+                  <select
+                    value={reportReason}
+                    onChange={(e) => setReportReason(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-[#121521] px-4 py-3 text-sm text-white/80 outline-none"
+                  >
+                    {reportReasons.map((reason) => (
+                      <option key={reason}>{reason}</option>
+                    ))}
+                  </select>
+
+                  <textarea
+                    value={reportDetails}
+                    onChange={(e) => setReportDetails(e.target.value)}
+                    rows={4}
+                    placeholder="Optional details..."
+                    className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm outline-none placeholder:text-white/35"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={reporting}
+                    className="w-full rounded-xl bg-red-600 px-4 py-3 text-sm font-bold hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {reporting ? "Submitting..." : "Submit Report"}
+                  </button>
+                </form>
+              )}
+
+              {safetyMessage && (
+                <p className="mt-4 rounded-2xl border border-white/10 bg-white/[0.04] p-4 text-sm text-white/70">
+                  {safetyMessage}
+                </p>
+              )}
             </div>
           </aside>
 
