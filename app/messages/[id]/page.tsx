@@ -45,7 +45,8 @@ export default function MessagePage() {
   const [userId, setUserId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
-  const [otherUserPresence, setOtherUserPresence] = useState<Presence | null>(null);
+  const [otherUserPresence, setOtherUserPresence] =
+    useState<Presence | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [otherUserTyping, setOtherUserTyping] = useState(false);
@@ -74,7 +75,9 @@ export default function MessagePage() {
 
           setConversations((current) =>
             current.map((conversation) => {
-              if (conversation.otherUser?.id !== otherUser.id) return conversation;
+              if (conversation.otherUser?.id !== otherUser.id) {
+                return conversation;
+              }
 
               return {
                 ...conversation,
@@ -109,7 +112,6 @@ export default function MessagePage() {
 
           if (newMessage.receiver_id === userId) {
             await markMessageRead(newMessage.id);
-
             newMessage.is_read = true;
           }
 
@@ -246,8 +248,9 @@ export default function MessagePage() {
         profiles.find((profile) => profile.id === otherMember?.user_id) || null;
 
       const foundPresence =
-        presences.find((presence) => presence.user_id === otherMember?.user_id) ||
-        null;
+        presences.find(
+          (presence) => presence.user_id === otherMember?.user_id
+        ) || null;
 
       return {
         id,
@@ -293,72 +296,72 @@ export default function MessagePage() {
   }
 
   async function sendMessage(e: React.FormEvent<HTMLFormElement>) {
-  e.preventDefault();
+    e.preventDefault();
 
-  const trimmedMessage = message.trim();
+    const trimmedMessage = message.trim();
 
-  if (!trimmedMessage || !userId) return;
+    if (!trimmedMessage || !userId) return;
 
-  setSending(true);
+    setSending(true);
 
-  const { data: members } = await supabase
-    .from("conversation_members")
-    .select("user_id")
-    .eq("conversation_id", conversationId);
+    const { data: members } = await supabase
+      .from("conversation_members")
+      .select("user_id")
+      .eq("conversation_id", conversationId);
 
-  const otherMember = members?.find((member) => member.user_id !== userId);
+    const otherMember = members?.find((member) => member.user_id !== userId);
 
-  if (!otherMember) {
-    console.error("No receiver found for this conversation.");
-    setSending(false);
-    return;
-  }
+    if (!otherMember) {
+      console.error("No receiver found for this conversation.");
+      setSending(false);
+      return;
+    }
 
-  const { data: existingBlocks, error: blockError } = await supabase
-    .from("blocks")
-    .select("id")
-    .or(
-      `and(blocker_id.eq.${userId},blocked_id.eq.${otherMember.user_id}),and(blocker_id.eq.${otherMember.user_id},blocked_id.eq.${userId})`
-    );
+    const { data: existingBlocks, error: blockError } = await supabase
+      .from("blocks")
+      .select("id")
+      .or(
+        `and(blocker_id.eq.${userId},blocked_id.eq.${otherMember.user_id}),and(blocker_id.eq.${otherMember.user_id},blocked_id.eq.${userId})`
+      );
 
-  if (blockError) {
-    console.error("Block check error:", blockError.message);
-    setSending(false);
-    return;
-  }
+    if (blockError) {
+      console.error("Block check error:", blockError.message);
+      setSending(false);
+      return;
+    }
 
-  if (existingBlocks && existingBlocks.length > 0) {
+    if (existingBlocks && existingBlocks.length > 0) {
+      setMessage("");
+      setSending(false);
+      alert("You cannot send messages to this user.");
+      return;
+    }
+
+    const { error } = await supabase.from("messages").insert({
+      conversation_id: conversationId,
+      sender_id: userId,
+      receiver_id: otherMember.user_id,
+      content: trimmedMessage,
+      is_read: false,
+    });
+
+    if (error) {
+      console.error("Send message error:", error.message);
+      setSending(false);
+      return;
+    }
+
+    await supabase.from("notifications").insert({
+      user_id: otherMember.user_id,
+      actor_id: userId,
+      type: "message",
+      conversation_id: conversationId,
+    });
+
     setMessage("");
+    setOtherUserTyping(false);
     setSending(false);
-    alert("You cannot send messages to this user.");
-    return;
   }
-
-  const { error } = await supabase.from("messages").insert({
-    conversation_id: conversationId,
-    sender_id: userId,
-    receiver_id: otherMember.user_id,
-    content: trimmedMessage,
-    is_read: false,
-  });
-
-  if (error) {
-    console.error("Send message error:", error.message);
-    setSending(false);
-    return;
-  }
-
-  await supabase.from("notifications").insert({
-    user_id: otherMember.user_id,
-    actor_id: userId,
-    type: "message",
-    conversation_id: conversationId,
-  });
-
-  setMessage("");
-  setOtherUserTyping(false);
-  setSending(false);
-}
 
   function getPresenceText(presence: Presence | null) {
     if (presence?.is_online) return "Online";
@@ -450,7 +453,7 @@ export default function MessagePage() {
                       </div>
 
                       <div className="min-w-0">
-                        <p className="truncate font-bold hover:text-violet-300">{name}</p>
+                        <p className="truncate font-bold">{name}</p>
                         <p className="truncate text-xs text-white/40">
                           {getPresenceText(presence)}
                         </p>
@@ -463,7 +466,10 @@ export default function MessagePage() {
 
             <section className="flex min-h-[600px] flex-col">
               <header className="border-b border-white/10 p-5">
-                <div className="flex items-center gap-4">
+                <Link
+                  href={otherUser?.id ? `/profile/${otherUser.id}` : "#"}
+                  className="flex w-fit cursor-pointer items-center gap-4 rounded-2xl p-2 transition hover:bg-white/5"
+                >
                   <div className="relative flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-700 via-violet-700 to-blue-950 text-xl font-black">
                     {otherUser?.avatar_url ? (
                       <img
@@ -493,18 +499,17 @@ export default function MessagePage() {
                             : "h-2.5 w-2.5 rounded-full bg-gray-500"
                         }
                       />
-                      <Link
-  href={otherUser?.id ? `/profile/${otherUser.id}` : "#"}
-className="text-2xl font-black hover:text-violet-300">
-  {displayName}
-</Link>
+
+                      <h2 className="text-2xl font-black transition hover:text-violet-300">
+                        {displayName}
+                      </h2>
                     </div>
 
                     <p className="text-sm text-white/45">
                       @{username} · {getPresenceText(otherUserPresence)}
                     </p>
                   </div>
-                </div>
+                </Link>
               </header>
 
               <div className="flex-1 space-y-2 overflow-y-auto p-5">
@@ -522,7 +527,9 @@ className="text-2xl font-black hover:text-violet-300">
                   return (
                     <div
                       key={chat.id}
-                      className={isMe ? "flex justify-end" : "flex justify-start"}
+                      className={
+                        isMe ? "flex justify-end" : "flex justify-start"
+                      }
                     >
                       <div
                         className={
@@ -556,7 +563,10 @@ className="text-2xl font-black hover:text-violet-300">
                 <div ref={bottomRef} />
               </div>
 
-              <form onSubmit={sendMessage} className="border-t border-white/10 p-5">
+              <form
+                onSubmit={sendMessage}
+                className="border-t border-white/10 p-5"
+              >
                 <div className="flex gap-3">
                   <input
                     value={message}
