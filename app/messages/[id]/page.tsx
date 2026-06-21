@@ -45,9 +45,7 @@ export default function MessagePage() {
   const [userId, setUserId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [otherUser, setOtherUser] = useState<Profile | null>(null);
-  const [otherUserPresence, setOtherUserPresence] = useState<Presence | null>(
-    null
-  );
+  const [otherUserPresence, setOtherUserPresence] = useState<Presence | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [message, setMessage] = useState("");
   const [otherUserTyping, setOtherUserTyping] = useState(false);
@@ -76,9 +74,7 @@ export default function MessagePage() {
 
           setConversations((current) =>
             current.map((conversation) => {
-              if (conversation.otherUser?.id !== otherUser.id) {
-                return conversation;
-              }
+              if (conversation.otherUser?.id !== otherUser.id) return conversation;
 
               return {
                 ...conversation,
@@ -96,6 +92,8 @@ export default function MessagePage() {
   }, [otherUser?.id]);
 
   useEffect(() => {
+    if (!conversationId) return;
+
     const channel = supabase
       .channel(`messages:${conversationId}`)
       .on(
@@ -109,6 +107,12 @@ export default function MessagePage() {
         async (payload) => {
           const newMessage = payload.new as ChatMessage;
 
+          if (newMessage.receiver_id === userId) {
+            await markMessageRead(newMessage.id);
+
+            newMessage.is_read = true;
+          }
+
           setMessages((currentMessages) => {
             const alreadyExists = currentMessages.some(
               (item) => item.id === newMessage.id
@@ -118,13 +122,6 @@ export default function MessagePage() {
 
             return [...currentMessages, newMessage];
           });
-
-          if (newMessage.receiver_id === userId) {
-            await supabase
-              .from("messages")
-              .update({ is_read: true })
-              .eq("id", newMessage.id);
-          }
         }
       )
       .on("broadcast", { event: "typing" }, (payload) => {
@@ -157,6 +154,29 @@ export default function MessagePage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, otherUserTyping]);
 
+  async function markConversationRead(currentUserId: string) {
+    const { error } = await supabase
+      .from("messages")
+      .update({ is_read: true })
+      .eq("conversation_id", conversationId)
+      .eq("receiver_id", currentUserId);
+
+    if (error) {
+      console.error("Mark conversation read error:", error.message);
+    }
+  }
+
+  async function markMessageRead(messageId: string) {
+    const { error } = await supabase
+      .from("messages")
+      .update({ is_read: true })
+      .eq("id", messageId);
+
+    if (error) {
+      console.error("Mark message read error:", error.message);
+    }
+  }
+
   async function loadChat() {
     setLoading(true);
 
@@ -179,12 +199,7 @@ export default function MessagePage() {
       .eq("conversation_id", conversationId)
       .eq("user_id", user.id);
 
-    await supabase
-      .from("messages")
-      .update({ is_read: true })
-      .eq("conversation_id", conversationId)
-      .eq("receiver_id", user.id)
-      .eq("is_read", false);
+    await markConversationRead(user.id);
 
     const { data: myMemberships } = await supabase
       .from("conversation_members")
@@ -327,7 +342,6 @@ export default function MessagePage() {
 
   function getPresenceText(presence: Presence | null) {
     if (presence?.is_online) return "Online";
-
     if (!presence?.last_seen) return "Offline";
 
     const lastSeen = new Date(presence.last_seen);
