@@ -450,7 +450,7 @@ export default function MessagePage() {
                       </div>
 
                       <div className="min-w-0">
-                        <p className="truncate font-bold">{name}</p>
+                        <p className="truncate font-bold hover:text-violet-300">{name}</p>
                         <p className="truncate text-xs text-white/40">
                           {getPresenceText(presence)}
                         </p>
@@ -493,7 +493,11 @@ export default function MessagePage() {
                             : "h-2.5 w-2.5 rounded-full bg-gray-500"
                         }
                       />
-                      <h2 className="text-2xl font-black">{displayName}</h2>
+                      <Link
+  href={otherUser?.id ? `/profile/${otherUser.id}` : "#"}
+className="text-2xl font-black hover:text-violet-300">
+  {displayName}
+</Link>
                     </div>
 
                     <p className="text-sm text-white/45">
