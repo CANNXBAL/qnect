@@ -514,7 +514,7 @@ export default function MessagePage() {
                             hour: "numeric",
                             minute: "2-digit",
                           })}
-                          {isMe ? " · Seen" : ""}
+                          {isMe ? (chat.is_read ? " · Seen" : " · Sent") : ""}
                         </p>
                       </div>
                     </div>
