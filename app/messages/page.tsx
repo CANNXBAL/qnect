@@ -16,7 +16,9 @@ type MessagePreview = {
   id: string;
   conversation_id: string;
   sender_id: string;
+  receiver_id: string | null;
   content: string;
+  is_read: boolean | null;
   created_at: string;
 };
 
@@ -29,14 +31,39 @@ type Conversation = {
 };
 
 export default function MessagesPage() {
+  const [userId, setUserId] = useState("");
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadConversations();
+    setupMessagesPage();
   }, []);
 
-  async function loadConversations() {
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`messages-list:${userId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "messages",
+          filter: `receiver_id=eq.${userId}`,
+        },
+        () => {
+          loadConversations(userId, false);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
+
+  async function setupMessagesPage() {
     setLoading(true);
 
     const {
@@ -48,10 +75,17 @@ export default function MessagesPage() {
       return;
     }
 
+    setUserId(user.id);
+    await loadConversations(user.id, true);
+  }
+
+  async function loadConversations(currentUserId: string, showLoading: boolean) {
+    if (showLoading) setLoading(true);
+
     const { data: myMemberships, error: myMembershipsError } = await supabase
       .from("conversation_members")
       .select("conversation_id, last_read_at")
-      .eq("user_id", user.id);
+      .eq("user_id", currentUserId);
 
     if (myMembershipsError) {
       console.error("My memberships error:", myMembershipsError.message);
@@ -80,7 +114,7 @@ export default function MessagesPage() {
 
     const otherUserIds =
       allMembers
-        ?.filter((member) => member.user_id !== user.id)
+        ?.filter((member) => member.user_id !== currentUserId)
         .map((member) => member.user_id) || [];
 
     let profiles: Profile[] = [];
@@ -100,7 +134,9 @@ export default function MessagesPage() {
 
     const { data: messageData, error: messagesError } = await supabase
       .from("messages")
-      .select("id, conversation_id, sender_id, content, created_at")
+      .select(
+        "id, conversation_id, sender_id, receiver_id, content, is_read, created_at"
+      )
       .in("conversation_id", conversationIds)
       .order("created_at", { ascending: false });
 
@@ -114,7 +150,7 @@ export default function MessagesPage() {
       const otherMember = allMembers?.find(
         (member) =>
           member.conversation_id === conversationId &&
-          member.user_id !== user.id
+          member.user_id !== currentUserId
       );
 
       const membership = myMemberships?.find(
@@ -128,7 +164,12 @@ export default function MessagesPage() {
       const lastMessage = conversationMessages[0] || null;
 
       const unreadCount = conversationMessages.filter((msg) => {
-        if (msg.sender_id === user.id) return false;
+        if (msg.sender_id === currentUserId) return false;
+
+        if (msg.receiver_id === currentUserId && msg.is_read === false) {
+          return true;
+        }
+
         if (!membership?.last_read_at) return true;
 
         return new Date(msg.created_at) > new Date(membership.last_read_at);
@@ -213,9 +254,13 @@ export default function MessagesPage() {
               <Link
                 key={conversation.id}
                 href={`/messages/${conversation.id}`}
-                className="flex items-center gap-4 rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 transition hover:bg-white/[0.08]"
+                className={
+                  conversation.unreadCount > 0
+                    ? "flex items-center gap-4 rounded-[2rem] border border-violet-500/40 bg-violet-500/10 p-5 transition hover:bg-violet-500/15"
+                    : "flex items-center gap-4 rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 transition hover:bg-white/[0.08]"
+                }
               >
-                <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-700 via-violet-700 to-blue-950 text-2xl font-black">
+                <div className="relative flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-cyan-700 via-violet-700 to-blue-950 text-2xl font-black">
                   {conversation.otherUser?.avatar_url ? (
                     <img
                       src={conversation.otherUser.avatar_url}
@@ -224,6 +269,10 @@ export default function MessagesPage() {
                     />
                   ) : (
                     avatarLetter
+                  )}
+
+                  {conversation.unreadCount > 0 && (
+                    <span className="absolute right-1 top-1 h-3 w-3 rounded-full bg-violet-400" />
                   )}
                 </div>
 
@@ -254,7 +303,7 @@ export default function MessagesPage() {
                   <p
                     className={
                       conversation.unreadCount > 0
-                        ? "mt-2 truncate text-sm font-bold text-white/85"
+                        ? "mt-2 truncate text-sm font-bold text-white/90"
                         : "mt-2 truncate text-sm text-white/45"
                     }
                   >
