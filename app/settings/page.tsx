@@ -4,21 +4,38 @@ import Navbar from "@/components/Navbar";
 import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
 
+const modes = ["Friends", "Gaming", "RP", "Dating"];
 const platforms = ["PC", "Xbox", "PlayStation", "Switch", "VR", "Mobile"];
 const games = ["FiveM", "RedM", "VRChat", "GTA Online", "Phasmophobia", "Dead by Daylight", "Minecraft", "Fortnite", "Call of Duty", "Apex Legends"];
 const lookingFor = ["Friends", "Duo", "Squad", "RP Partner", "Content Creator", "Dating", "Community"];
 const vibes = ["Chill", "Competitive", "Story Driven", "Night Owl", "Funny", "Mature", "Creative", "Voice Chat", "Serious RP"];
+const availability = ["Morning", "Afternoon", "Evening", "Late Night", "Weekdays", "Weekends"];
+const rpStyles = ["Gang RP", "Civilian RP", "Criminal RP", "Business RP", "Story RP", "Serious RP"];
+const datingIntent = ["Just seeing", "Casual dating", "Long-term", "Gaming date nights"];
 
 export default function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
+  const [age, setAge] = useState("");
+  const [timezone, setTimezone] = useState("");
   const [bio, setBio] = useState("");
+  const [mode, setMode] = useState("Gaming");
   const [platform, setPlatform] = useState("PC");
+  const [voiceChat, setVoiceChat] = useState("No Preference");
+
   const [selectedGames, setSelectedGames] = useState<string[]>([]);
   const [selectedLookingFor, setSelectedLookingFor] = useState<string[]>([]);
   const [selectedVibes, setSelectedVibes] = useState<string[]>([]);
+  const [selectedAvailability, setSelectedAvailability] = useState<string[]>([]);
+  const [selectedRpStyles, setSelectedRpStyles] = useState<string[]>([]);
+  const [selectedDatingIntent, setSelectedDatingIntent] = useState<string[]>([]);
+
+  const [rpCharacterName, setRpCharacterName] = useState("");
+  const [rpExperience, setRpExperience] = useState("");
+
   const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -43,15 +60,35 @@ export default function SettingsPage() {
 
     setDisplayName(data.display_name || "");
     setUsername(data.username || "");
+    setAge(data.age ? String(data.age) : "");
+    setTimezone(data.timezone || "");
     setBio(data.bio || "");
+    setMode(data.mode || "Gaming");
     setPlatform(data.platform || "PC");
+    setVoiceChat(data.voice_chat || "No Preference");
+
     setSelectedGames(data.games || []);
     setSelectedLookingFor(data.looking_for || []);
     setSelectedVibes(data.vibes || []);
+    setSelectedAvailability(data.availability || []);
+    setSelectedRpStyles(data.rp_styles || []);
+
+    if (Array.isArray(data.dating_intent)) {
+      setSelectedDatingIntent(data.dating_intent);
+    } else if (data.dating_intent) {
+      setSelectedDatingIntent([data.dating_intent]);
+    }
+
+    setRpCharacterName(data.rp_character_name || "");
+    setRpExperience(data.rp_experience || "");
     setAvatarUrl(data.avatar_url || "");
   }
 
-  function toggleValue(value: string, list: string[], setList: (v: string[]) => void) {
+  function toggleValue(
+    value: string,
+    list: string[],
+    setList: (v: string[]) => void
+  ) {
     if (list.includes(value)) {
       setList(list.filter((item) => item !== value));
     } else {
@@ -109,11 +146,20 @@ export default function SettingsPage() {
         email: user.email,
         display_name: displayName,
         username,
+        age: age ? Number(age) : null,
+        timezone,
         bio,
+        mode,
         platform,
+        voice_chat: voiceChat,
         games: selectedGames,
         looking_for: selectedLookingFor,
         vibes: selectedVibes,
+        availability: selectedAvailability,
+        rp_character_name: rpCharacterName,
+        rp_experience: rpExperience,
+        rp_styles: selectedRpStyles,
+        dating_intent: selectedDatingIntent,
         avatar_url: finalAvatarUrl,
       });
 
@@ -158,7 +204,11 @@ export default function SettingsPage() {
             <div className="flex flex-col gap-5 rounded-[2rem] border border-white/10 bg-white/[0.03] p-5 md:flex-row md:items-center">
               <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-[2rem] bg-gradient-to-br from-cyan-700 via-violet-700 to-blue-950 text-4xl font-black">
                 {avatarUrl ? (
-                  <img src={avatarUrl} alt="Avatar" className="h-full w-full object-cover" />
+                  <img
+                    src={avatarUrl}
+                    alt="Avatar"
+                    className="h-full w-full object-cover"
+                  />
                 ) : (
                   displayName.charAt(0).toUpperCase() || "?"
                 )}
@@ -177,7 +227,7 @@ export default function SettingsPage() {
           </section>
 
           <section>
-            <h2 className="mb-4 text-2xl font-black">Account</h2>
+            <h2 className="mb-4 text-2xl font-black">Basic Info</h2>
 
             <div className="grid gap-4 md:grid-cols-2">
               <input
@@ -194,6 +244,21 @@ export default function SettingsPage() {
                 className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none placeholder:text-white/35"
               />
 
+              <input
+                value={age}
+                onChange={(e) => setAge(e.target.value)}
+                type="number"
+                placeholder="Age"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none placeholder:text-white/35"
+              />
+
+              <input
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                placeholder="Timezone"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none placeholder:text-white/35"
+              />
+
               <textarea
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
@@ -203,6 +268,8 @@ export default function SettingsPage() {
               />
             </div>
           </section>
+
+          <RadioSection title="Primary Mode" items={modes} value={mode} setValue={setMode} />
 
           <section>
             <h2 className="mb-4 text-2xl font-black">Platform</h2>
@@ -217,6 +284,13 @@ export default function SettingsPage() {
               ))}
             </select>
           </section>
+
+          <RadioSection
+            title="Voice Chat"
+            items={["Required", "Preferred", "Text Only", "No Preference"]}
+            value={voiceChat}
+            setValue={setVoiceChat}
+          />
 
           <ChoiceSection
             title="Games"
@@ -241,6 +315,59 @@ export default function SettingsPage() {
             toggle={(item) => toggleValue(item, selectedVibes, setSelectedVibes)}
           />
 
+          <ChoiceSection
+            title="Availability"
+            items={availability}
+            selected={selectedAvailability}
+            toggle={(item) =>
+              toggleValue(item, selectedAvailability, setSelectedAvailability)
+            }
+          />
+
+          <section className="rounded-[2rem] border border-white/10 bg-white/[0.03] p-5">
+            <h2 className="mb-4 text-2xl font-black">RP Details</h2>
+
+            <div className="mb-5 grid gap-4 md:grid-cols-2">
+              <input
+                value={rpCharacterName}
+                onChange={(e) => setRpCharacterName(e.target.value)}
+                placeholder="RP Character Name"
+                className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none placeholder:text-white/35"
+              />
+
+              <select
+                value={rpExperience}
+                onChange={(e) => setRpExperience(e.target.value)}
+                className="rounded-xl border border-white/10 bg-[#121521] px-4 py-3 text-white/80 outline-none"
+              >
+                <option value="">RP Experience</option>
+                <option>New</option>
+                <option>Intermediate</option>
+                <option>Veteran</option>
+              </select>
+            </div>
+
+            <ChoiceSection
+              title="RP Styles"
+              items={rpStyles}
+              selected={selectedRpStyles}
+              toggle={(item) =>
+                toggleValue(item, selectedRpStyles, setSelectedRpStyles)
+              }
+            />
+          </section>
+
+          <section className="rounded-[2rem] border border-pink-500/20 bg-pink-500/[0.04] p-5">
+            <ChoiceSection
+              title="Dating Intent"
+              items={datingIntent}
+              selected={selectedDatingIntent}
+              toggle={(item) =>
+                toggleValue(item, selectedDatingIntent, setSelectedDatingIntent)
+              }
+            />
+          </section>
+
           {message && (
             <div className="rounded-xl border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-white/70">
               {message}
@@ -257,6 +384,45 @@ export default function SettingsPage() {
         </form>
       </div>
     </main>
+  );
+}
+
+function RadioSection({
+  title,
+  items,
+  value,
+  setValue,
+}: {
+  title: string;
+  items: string[];
+  value: string;
+  setValue: (value: string) => void;
+}) {
+  return (
+    <section>
+      <h2 className="mb-4 text-2xl font-black">{title}</h2>
+
+      <div className="flex flex-wrap gap-3">
+        {items.map((item) => (
+          <label
+            key={item}
+            className={
+              value === item
+                ? "cursor-pointer rounded-full border border-violet-500/40 bg-violet-500/20 px-4 py-2 text-sm text-violet-100"
+                : "cursor-pointer rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:bg-white/10"
+            }
+          >
+            <input
+              type="radio"
+              checked={value === item}
+              onChange={() => setValue(item)}
+              className="mr-2 accent-violet-600"
+            />
+            {item}
+          </label>
+        ))}
+      </div>
+    </section>
   );
 }
 
