@@ -293,52 +293,72 @@ export default function MessagePage() {
   }
 
   async function sendMessage(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
+  e.preventDefault();
 
-    const trimmedMessage = message.trim();
+  const trimmedMessage = message.trim();
 
-    if (!trimmedMessage || !userId) return;
+  if (!trimmedMessage || !userId) return;
 
-    setSending(true);
+  setSending(true);
 
-    const { data: members } = await supabase
-      .from("conversation_members")
-      .select("user_id")
-      .eq("conversation_id", conversationId);
+  const { data: members } = await supabase
+    .from("conversation_members")
+    .select("user_id")
+    .eq("conversation_id", conversationId);
 
-    const otherMember = members?.find((member) => member.user_id !== userId);
+  const otherMember = members?.find((member) => member.user_id !== userId);
 
-    if (!otherMember) {
-      console.error("No receiver found for this conversation.");
-      setSending(false);
-      return;
-    }
-
-    const { error } = await supabase.from("messages").insert({
-      conversation_id: conversationId,
-      sender_id: userId,
-      receiver_id: otherMember.user_id,
-      content: trimmedMessage,
-      is_read: false,
-    });
-
-    if (error) {
-      console.error("Send message error:", error.message);
-      setSending(false);
-      return;
-    }
-
-    await supabase.from("notifications").insert({
-      user_id: otherMember.user_id,
-      actor_id: userId,
-      type: "message",
-      conversation_id: conversationId,
-    });
-
-    setMessage("");
-    setOtherUserTyping(false);
+  if (!otherMember) {
+    console.error("No receiver found for this conversation.");
     setSending(false);
+    return;
   }
+
+  const { data: existingBlocks, error: blockError } = await supabase
+    .from("blocks")
+    .select("id")
+    .or(
+      `and(blocker_id.eq.${userId},blocked_id.eq.${otherMember.user_id}),and(blocker_id.eq.${otherMember.user_id},blocked_id.eq.${userId})`
+    );
+
+  if (blockError) {
+    console.error("Block check error:", blockError.message);
+    setSending(false);
+    return;
+  }
+
+  if (existingBlocks && existingBlocks.length > 0) {
+    setMessage("");
+    setSending(false);
+    alert("You cannot send messages to this user.");
+    return;
+  }
+
+  const { error } = await supabase.from("messages").insert({
+    conversation_id: conversationId,
+    sender_id: userId,
+    receiver_id: otherMember.user_id,
+    content: trimmedMessage,
+    is_read: false,
+  });
+
+  if (error) {
+    console.error("Send message error:", error.message);
+    setSending(false);
+    return;
+  }
+
+  await supabase.from("notifications").insert({
+    user_id: otherMember.user_id,
+    actor_id: userId,
+    type: "message",
+    conversation_id: conversationId,
+  });
+
+  setMessage("");
+  setOtherUserTyping(false);
+  setSending(false);
+}
 
   function getPresenceText(presence: Presence | null) {
     if (presence?.is_online) return "Online";

@@ -24,6 +24,11 @@ type Profile = {
   rp_experience?: string | null;
 };
 
+type Block = {
+  blocker_id: string;
+  blocked_id: string;
+};
+
 const modes = ["All", "Friends", "Gaming", "RP", "Dating"];
 const platforms = ["All", "PC", "Xbox", "PlayStation", "Switch", "VR", "Mobile"];
 const games = [
@@ -100,6 +105,26 @@ export default function DiscoverPage() {
       data: { user },
     } = await supabase.auth.getUser();
 
+    let blockedIds: string[] = [];
+
+    if (user) {
+      const { data: blocks, error: blocksError } = await supabase
+        .from("blocks")
+        .select("blocker_id, blocked_id")
+        .or(`blocker_id.eq.${user.id},blocked_id.eq.${user.id}`);
+
+      if (blocksError) {
+        console.error("Error loading blocks:", blocksError.message);
+      } else {
+        blockedIds =
+          (blocks as Block[] | null)
+            ?.map((block) =>
+              block.blocker_id === user.id ? block.blocked_id : block.blocker_id
+            )
+            .filter(Boolean) || [];
+      }
+    }
+
     let query = supabase
       .from("profiles")
       .select("*")
@@ -116,7 +141,11 @@ export default function DiscoverPage() {
       console.error("Error loading profiles:", error.message);
       setProfiles([]);
     } else {
-      setProfiles((data as Profile[]) || []);
+      const visibleProfiles = ((data as Profile[]) || []).filter(
+        (profile) => !blockedIds.includes(profile.id)
+      );
+
+      setProfiles(visibleProfiles);
     }
 
     setLoading(false);
@@ -194,15 +223,16 @@ export default function DiscoverPage() {
     voiceFilter,
   ]);
 
-  const activeFilterCount = [
-    modeFilter,
-    platformFilter,
-    gameFilter,
-    lookingForFilter,
-    vibeFilter,
-    rpStyleFilter,
-    voiceFilter,
-  ].filter((item) => item !== "All").length + (search.trim() ? 1 : 0);
+  const activeFilterCount =
+    [
+      modeFilter,
+      platformFilter,
+      gameFilter,
+      lookingForFilter,
+      vibeFilter,
+      rpStyleFilter,
+      voiceFilter,
+    ].filter((item) => item !== "All").length + (search.trim() ? 1 : 0);
 
   function clearFilters() {
     setModeFilter("All");

@@ -76,52 +76,72 @@ export default function ProfilePage() {
   }
 
   async function sendMatchRequest() {
-    setSendingRequest(true);
-    setRequestMessage("");
+  setSendingRequest(true);
+  setRequestMessage("");
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
-    if (!user) {
-      setRequestMessage("You need to log in before sending a Qnect request.");
-      setSendingRequest(false);
-      return;
-    }
-
-    if (user.id === profile?.id) {
-      setRequestMessage("You cannot Qnect with yourself.");
-      setSendingRequest(false);
-      return;
-    }
-
-    const { error } = await supabase.from("matches").insert({
-      sender_id: user.id,
-      receiver_id: profile?.id,
-      status: "pending",
-    });
-
-    if (error) {
-      if (error.code === "23505") {
-        setRequestMessage("You already sent this user a Qnect request.");
-      } else {
-        console.error("Match request error:", error.message);
-        setRequestMessage("Something went wrong sending the Qnect request.");
-      }
-
-      setSendingRequest(false);
-      return;
-    }
-
-    await supabase.from("notifications").insert({
-      user_id: profile?.id,
-      actor_id: user.id,
-      type: "match_request",
-    });
-
-    setRequestMessage("Qnect request sent!");
+  if (!user) {
+    setRequestMessage("You need to log in before sending a Qnect request.");
     setSendingRequest(false);
+    return;
   }
+
+  if (user.id === profile?.id) {
+    setRequestMessage("You cannot Qnect with yourself.");
+    setSendingRequest(false);
+    return;
+  }
+
+  const { data: existingBlocks, error: blockError } = await supabase
+    .from("blocks")
+    .select("id")
+    .or(
+      `and(blocker_id.eq.${user.id},blocked_id.eq.${profile?.id}),and(blocker_id.eq.${profile?.id},blocked_id.eq.${user.id})`
+    );
+
+  if (blockError) {
+    console.error("Block check error:", blockError.message);
+    setRequestMessage("Something went wrong checking this profile.");
+    setSendingRequest(false);
+    return;
+  }
+
+  if (existingBlocks && existingBlocks.length > 0) {
+    setRequestMessage("You cannot Qnect with this user.");
+    setSendingRequest(false);
+    return;
+  }
+
+  const { error } = await supabase.from("matches").insert({
+    sender_id: user.id,
+    receiver_id: profile?.id,
+    status: "pending",
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      setRequestMessage("You already sent this user a Qnect request.");
+    } else {
+      console.error("Match request error:", error.message);
+      setRequestMessage("Something went wrong sending the Qnect request.");
+    }
+
+    setSendingRequest(false);
+    return;
+  }
+
+  await supabase.from("notifications").insert({
+    user_id: profile?.id,
+    actor_id: user.id,
+    type: "match_request",
+  });
+
+  setRequestMessage("Qnect request sent!");
+  setSendingRequest(false);
+}
 
   async function blockUser() {
     setSafetyMessage("");
