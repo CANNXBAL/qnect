@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 import { useEffect, useState } from "react";
 
 const modes = ["Friends", "Gaming", "RP", "Dating"];
+const genders = ["Male", "Female", "Non-binary", "Other"];
+const interestedOptions = ["Men", "Women", "Everyone"];
 const platforms = ["PC", "Xbox", "PlayStation", "Switch", "VR", "Mobile"];
 const games = ["FiveM", "RedM", "VRChat", "GTA Online", "Phasmophobia", "Dead by Daylight", "Minecraft", "Fortnite", "Call of Duty", "Apex Legends"];
 const lookingFor = ["Friends", "Duo", "Squad", "RP Partner", "Content Creator", "Dating", "Community"];
@@ -20,6 +22,8 @@ export default function SettingsPage() {
   const [timezone, setTimezone] = useState("");
   const [bio, setBio] = useState("");
   const [mode, setMode] = useState("Gaming");
+  const [gender, setGender] = useState("");
+  const [interestedIn, setInterestedIn] = useState<string[]>([]);
   const [platform, setPlatform] = useState("PC");
   const [voiceChat, setVoiceChat] = useState("No Preference");
 
@@ -64,6 +68,8 @@ export default function SettingsPage() {
     setTimezone(data.timezone || "");
     setBio(data.bio || "");
     setMode(data.mode || "Gaming");
+    setGender(data.gender || "");
+    setInterestedIn(data.interested_in || []);
     setPlatform(data.platform || "PC");
     setVoiceChat(data.voice_chat || "No Preference");
 
@@ -150,6 +156,8 @@ export default function SettingsPage() {
         timezone,
         bio,
         mode,
+        gender,
+        interested_in: interestedIn,
         platform,
         voice_chat: voiceChat,
         games: selectedGames,
@@ -269,7 +277,58 @@ export default function SettingsPage() {
             </div>
           </section>
 
-          <RadioSection title="Primary Mode" items={modes} value={mode} setValue={setMode} />
+          <RadioSection
+            title="Primary Mode"
+            items={modes}
+            value={mode}
+            setValue={setMode}
+          />
+
+          <section className="rounded-[2rem] border border-pink-500/20 bg-pink-500/[0.04] p-5">
+            <h2 className="mb-4 text-2xl font-black">Dating Preferences</h2>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              <select
+                value={gender}
+                onChange={(e) => setGender(e.target.value)}
+                className="rounded-xl border border-white/10 bg-[#121521] px-4 py-3 text-white/80 outline-none"
+              >
+                <option value="">Select Gender</option>
+
+                {genders.map((item) => (
+                  <option key={item}>{item}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="mt-5">
+              <h3 className="mb-3 text-lg font-black">Interested In</h3>
+
+              <div className="flex flex-wrap gap-3">
+                {interestedOptions.map((item) => (
+                  <label
+                    key={item}
+                    className={
+                      interestedIn.includes(item)
+                        ? "cursor-pointer rounded-full border border-pink-500/40 bg-pink-500/20 px-4 py-2 text-sm text-pink-100"
+                        : "cursor-pointer rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-white/70 hover:bg-white/10"
+                    }
+                  >
+                    <input
+                      type="checkbox"
+                      checked={interestedIn.includes(item)}
+                      onChange={() =>
+                        toggleValue(item, interestedIn, setInterestedIn)
+                      }
+                      className="mr-2 accent-pink-600"
+                    />
+
+                    {item}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </section>
 
           <section>
             <h2 className="mb-4 text-2xl font-black">Platform</h2>
